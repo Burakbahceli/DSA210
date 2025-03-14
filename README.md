@@ -87,6 +87,7 @@ Examine long-term trends to determine how sleep is impacted by changes in the we
 
 
 Example Analysis
+
 A good concept would be to graph temperature and sleep quality to determine whether there is an ideal range for improved sleep. If there is an obvious trend, it would indicate that temperature matters. One other example compares high-humidity nights with low-humidity nights to determine whether humidity levels influence sleep issues. I will utilize air quality data to determine whether greater PM2.5 is associated with poorer sleep. For instance, if sleep issues increase on days with increased air pollution, this could indicate an association between air quality and the quality of sleep. Similarly, I’ll assess how air pressure changes correlate with sleep quality, exploring whether fluctuations in atmospheric conditions affect sleep duration. 
 
 
