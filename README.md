@@ -1,5 +1,7 @@
   # DSA210
-  Project Overview
+ DSA 210 Project-Sleep Data vs Weather Data 
+	
+ Project Overview
 I will keep track of my sleep after Ramadan for a month. I will monitor how various kinds of weather influence my sleep. I will record things such as temperature, humidity, barometric pressure, precipitation, and air quality, in addition to how long I sleep and the quality of my sleep. I am curious about what kinds of weather conditions influence my sleep the most. I will use graphs and statistics to determine patterns. The concept is simple: collect night and weather information, seek correlations, and experiment with varying conditions to determine what affects the quality of sleep. In some weekends and holidays, I will be sleeping in different places which will be different environment to get data it will help me to compare.
 
 Objectives
