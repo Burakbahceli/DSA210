@@ -1,0 +1,215 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+import statsmodels.api as sm
+from io import StringIO
+
+# ---------- 1. Load Data ----------
+data = """Date,O3,PM2.5,PM10,NO2,CO,SO2,Temperature,Humidity,Total Sleep Duration,Light Sleep,REM Sleep,Deep Sleep,Awake Time
+31.03,47,34,33,11,1,1,16,70,7 h 22 m,5 h 24 m,1h 47 m,11m,29m
+1.03,39,40,23,17,6,2,14,75,7h 40m,4h 18m,2h 47m,35m,1m
+3.04,14,22,9,23,1,10,7,93,11h 3m,8h 46m,2h 11m,6m,34m
+4.04,22,35,15,18,2,20,13,74,7h 48m,5h 3m,2h 28m,17m,10m
+7.04,12,37,21,25,1,4,7,93,10h 21m,6h 42m,3h 39m,0m,19m
+8.04,18,25,14,22,2,4,4,86,6h 17m,3h 55m,2h 22m,0m,1m
+9.04,18,58,30,33,1,5,9,42,8h 4m,4h 48m,2h 53m,23m,0m
+10.04,29,36,21,28,1,12,12,46,7h 15m,4h 19m,2h 56m,0m,10m
+12.04,29,27,15,27,1,9,8,42,10h 43m,7h 56m,2h 47m,0m,43m
+14.04,31,24,14,6,3,20,11,57,5h 19m,3h 22m,1h 48m,9m,1m
+15.04,39,21,14,11,1,6,7,88,7h 41m,4h 31m,2h 32m,38m,0m
+16.04,31,33,21,32,1,10,9,70,9h 0m,5h 26m,3h 34m,0m,13m
+17.04,16,68,30,1,1,11,7,82,8h 48m,6h 11m,1h 41m,56m,50m
+18.04,14,109,44,41,2,17,13,76,10h 3m,7h 4m,2h 44m,15m,36m
+20.04,26,35,21,7,2,13,8,76,7h 41m,5h 50m,1h 38m,13m,14m
+21.04,21,59,27,22,3,22,8,84,7h 2m,5h 1m,1h 23m,38m,4m
+23.04,22,53,29,27,1,9,10,87,8h 27m,6h 18m,1h 46m,23m,21m
+"""
+
+df = pd.read_csv(StringIO(data))
+
+# ---------- 2. Preprocess ----------
+def time_to_minutes(t):
+    """Convert formats like '7h 22m', '1h 5m', '35m' into total minutes."""
+    if pd.isnull(t):
+        return np.nan
+        
+    t = str(t).lower().replace(" ", "")
+    h, m = 0, 0
+    
+    if "h" in t:
+        parts = t.split("h")
+        try:
+            h = int(parts[0])
+        except:
+            h = 0
+        m_part = parts[1].replace("m", "").replace("s", "")
+        try:
+            if m_part:
+                m = int(m_part)
+        except:
+            m = 0
+    elif "m" in t:
+        m_part = t.replace("m", "")
+        try:
+            m = int(m_part)
+        except:
+            m = 0
+            
+    return h * 60 + m
+
+# Manual date conversion - completely different approach to avoid str accessor
+date_list = []
+for date_str in df['Date']:
+    try:
+        day, month = date_str.split('.')
+        day = int(day)
+        month = int(month)
+        date_list.append(pd.Timestamp(2025, month, day))
+    except:
+        # Handle any parsing errors
+        date_list.append(pd.NaT)
+        
+df["Date"] = date_list
+
+sleep_cols = ["Total Sleep Duration", "Light Sleep", "REM Sleep", "Deep Sleep", "Awake Time"]
+for col in sleep_cols:
+    df[col + " (min)"] = df[col].apply(time_to_minutes)
+
+# Print data overview
+print("Data Overview:")
+print(f"Number of records: {len(df)}")
+print("\nDescriptive Statistics for Air Quality and Sleep:")
+print(df[["PM2.5", "Total Sleep Duration (min)", "REM Sleep (min)", "Deep Sleep (min)"]].describe())
+
+# ---------- 3. EDA ----------
+# Set the style for better visualizations
+sns.set(style="whitegrid")
+
+# Correlation heatmap
+plt.figure(figsize=(12, 8))
+correlation_matrix = df.corr(numeric_only=True)
+mask = np.triu(correlation_matrix)
+sns.heatmap(correlation_matrix, annot=True, cmap="coolwarm", fmt=".2f", mask=mask)
+plt.title("Correlation Heatmap of Air Quality and Sleep Metrics", fontsize=16)
+plt.tight_layout()
+plt.show()
+
+# Time series of key metrics
+plt.figure(figsize=(14, 8))
+plt.subplot(2, 1, 1)
+sns.lineplot(data=df, x="Date", y="Total Sleep Duration (min)", marker='o', linewidth=2)
+plt.title("Total Sleep Duration Over Time", fontsize=14)
+plt.grid(True)
+
+plt.subplot(2, 1, 2)
+sns.lineplot(data=df, x="Date", y="PM2.5", marker='o', color='red', linewidth=2)
+plt.title("PM2.5 Levels Over Time", fontsize=14)
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# Scatter plots of key relationships
+fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+
+# PM2.5 vs Total Sleep
+sns.regplot(data=df, x="PM2.5", y="Total Sleep Duration (min)", ax=axes[0, 0])
+axes[0, 0].set_title("PM2.5 vs Total Sleep Duration", fontsize=14)
+axes[0, 0].grid(True)
+
+# PM2.5 vs REM Sleep
+sns.regplot(data=df, x="PM2.5", y="REM Sleep (min)", ax=axes[0, 1])
+axes[0, 1].set_title("PM2.5 vs REM Sleep", fontsize=14)
+axes[0, 1].grid(True)
+
+# Temperature vs Total Sleep
+sns.regplot(data=df, x="Temperature", y="Total Sleep Duration (min)", ax=axes[1, 0])
+axes[1, 0].set_title("Temperature vs Total Sleep Duration", fontsize=14)
+axes[1, 0].grid(True)
+
+# Humidity vs Total Sleep
+sns.regplot(data=df, x="Humidity", y="Total Sleep Duration (min)", ax=axes[1, 1])
+axes[1, 1].set_title("Humidity vs Total Sleep Duration", fontsize=14)
+axes[1, 1].grid(True)
+
+plt.tight_layout()
+plt.show()
+
+# ---------- 4. Statistical Analysis ----------
+# Create a correlation summary for sleep duration
+sleep_corr = correlation_matrix["Total Sleep Duration (min)"].sort_values(ascending=False)
+print("\nCorrelations with Total Sleep Duration:")
+print(sleep_corr)
+
+# Linear regression model with relevant predictors
+print("\n--- Multiple Linear Regression Model ---")
+# Select variables based on correlation and domain knowledge
+predictors = ["PM2.5", "Temperature", "Humidity", "NO2"]
+X = df[predictors]
+X = sm.add_constant(X)  # Add constant term
+y = df["Total Sleep Duration (min)"]
+
+# Fit the model
+model = sm.OLS(y, X).fit()
+print(model.summary())
+
+# T-test: Compare sleep duration on high vs low PM2.5 days
+print("\n--- T-Test Analysis ---")
+median_pm = df["PM2.5"].median()
+print(f"Median PM2.5 value: {median_pm}")
+
+low_pm = df[df["PM2.5"] <= median_pm]["Total Sleep Duration (min)"]
+high_pm = df[df["PM2.5"] > median_pm]["Total Sleep Duration (min)"]
+
+print(f"Average sleep on low PM2.5 days: {low_pm.mean():.2f} minutes ({low_pm.mean()/60:.2f} hours)")
+print(f"Average sleep on high PM2.5 days: {high_pm.mean():.2f} minutes ({high_pm.mean()/60:.2f} hours)")
+
+t_stat, p_val = stats.ttest_ind(low_pm.dropna(), high_pm.dropna(), equal_var=False)
+print(f"T-Test (Low vs High PM2.5): T = {t_stat:.2f}, p = {p_val:.4f}")
+
+# Effect size (Cohen's d)
+pooled_std = np.sqrt(((len(low_pm) - 1) * low_pm.std()**2 + (len(high_pm) - 1) * high_pm.std()**2) / 
+                     (len(low_pm) + len(high_pm) - 2))
+cohen_d = (low_pm.mean() - high_pm.mean()) / pooled_std
+print(f"Effect size (Cohen's d): {cohen_d:.2f}")
+
+# ---------- 5. ANOVA: Compare sleep quality across different PM2.5 groups ----------
+print("\n--- ANOVA Analysis ---")
+# Create PM2.5 categories: Low (≤30), Medium (31-60), High (>60)
+df["PM2.5 Category"] = pd.cut(df["PM2.5"], 
+                            bins=[0, 30, 60, float('inf')],
+                            labels=["Low", "Medium", "High"])
+
+# Display counts in each category
+category_counts = df["PM2.5 Category"].value_counts()
+print("PM2.5 Category Counts:")
+print(category_counts)
+
+# Run ANOVA
+categories = df["PM2.5 Category"].dropna().unique()
+sleep_by_category = [df[df["PM2.5 Category"] == cat]["Total Sleep Duration (min)"].dropna() for cat in categories]
+f_stat, p_val_anova = stats.f_oneway(*sleep_by_category)
+print(f"ANOVA Result: F = {f_stat:.2f}, p = {p_val_anova:.4f}")
+
+# Visualize sleep duration by PM2.5 category
+plt.figure(figsize=(10, 6))
+sns.boxplot(data=df, x="PM2.5 Category", y="Total Sleep Duration (min)")
+plt.title("Sleep Duration by PM2.5 Category", fontsize=14)
+plt.xlabel("PM2.5 Level", fontsize=12)
+plt.ylabel("Sleep Duration (minutes)", fontsize=12)
+plt.grid(True)
+plt.show()
+
+# ---------- 6. Conclusion ----------
+print("\n--- Analysis Conclusion ---")
+print("This analysis explored the relationship between air quality metrics and sleep duration.")
+print("Key findings:")
+if p_val < 0.05 or p_val_anova < 0.05:
+    print("- There appears to be a significant relationship between PM2.5 levels and sleep duration")
+else:
+    print("- No statistically significant relationship was found between PM2.5 levels and sleep duration")
+    
+print(f"- The regression model explains approximately {model.rsquared * 100:.1f}% of the variance in sleep duration")
+print(f"- The strongest air quality predictor of sleep duration was {predictors[np.argmax(np.abs(model.params[1:]))]}")
