@@ -6,7 +6,7 @@ from scipy import stats
 import statsmodels.api as sm
 from io import StringIO
 
-
+# ---------- 1. Load Data ----------
 data = """Date,O3,PM2.5,PM10,NO2,CO,SO2,Temperature,Humidity,Total Sleep Duration,Light Sleep,REM Sleep,Deep Sleep,Awake Time
 31.03,47,34,33,11,1,1,16,70,7 h 22 m,5 h 24 m,1h 47 m,11m,29m
 1.03,39,40,23,17,6,2,14,75,7h 40m,4h 18m,2h 47m,35m,1m
@@ -29,6 +29,7 @@ data = """Date,O3,PM2.5,PM10,NO2,CO,SO2,Temperature,Humidity,Total Sleep Duratio
 
 df = pd.read_csv(StringIO(data))
 
+# ---------- 2. Preprocess ----------
 def time_to_minutes(t):
     """Convert formats like '7h 22m', '1h 5m', '35m' into total minutes."""
     if pd.isnull(t):
@@ -58,6 +59,7 @@ def time_to_minutes(t):
             
     return h * 60 + m
 
+# Manual date conversion
 date_list = []
 for date_str in df['Date']:
     try:
@@ -66,125 +68,185 @@ for date_str in df['Date']:
         month = int(month)
         date_list.append(pd.Timestamp(2025, month, day))
     except:
+        # Handle any parsing errors
         date_list.append(pd.NaT)
         
 df["Date"] = date_list
 
-sleep_cols = ["Total Sleep Duration", "Light Sleep", "REM Sleep", "Deep Sleep", "Awake Time"]
+# Convert sleep duration columns to minutes
+sleep_cols = ["Light Sleep", "REM Sleep", "Deep Sleep", "Total Sleep Duration", "Awake Time"]
 for col in sleep_cols:
     df[col + " (min)"] = df[col].apply(time_to_minutes)
 
+# Define environmental and air quality parameters
+air_quality_cols = ["O3", "PM2.5", "PM10", "NO2", "CO", "SO2"]
+env_cols = ["Temperature", "Humidity"]
+sleep_quality_cols = ["Light Sleep (min)", "REM Sleep (min)", "Deep Sleep (min)"]
+
+all_predictors = air_quality_cols + env_cols
+all_targets = sleep_quality_cols
+
+# Print data overview
 print("Data Overview:")
 print(f"Number of records: {len(df)}")
-print("\nDescriptive Statistics for Air Quality and Sleep:")
-print(df[["PM2.5", "Total Sleep Duration (min)", "REM Sleep (min)", "Deep Sleep (min)"]].describe())
+print("\nDescriptive Statistics for Air Quality and Sleep Quality:")
+print(df[air_quality_cols + sleep_quality_cols].describe())
 
-sns.set(style="whitegrid")
-
-plt.figure(figsize=(12, 8))
+# ---------- 3. Correlation Analysis ----------
+print("\n--- Correlation Analysis ---")
 correlation_matrix = df.corr(numeric_only=True)
+
+# Set up a figure for the correlation heatmap
+plt.figure(figsize=(15, 12))
 mask = np.triu(correlation_matrix)
 sns.heatmap(correlation_matrix, annot=True, cmap="coolwarm", fmt=".2f", mask=mask)
 plt.title("Correlation Heatmap of Air Quality and Sleep Metrics", fontsize=16)
 plt.tight_layout()
 plt.show()
 
-plt.figure(figsize=(14, 8))
-plt.subplot(2, 1, 1)
-sns.lineplot(data=df, x="Date", y="Total Sleep Duration (min)", marker='o', linewidth=2)
-plt.title("Total Sleep Duration Over Time", fontsize=14)
-plt.grid(True)
+# Extract and display correlations between air quality/environmental factors and sleep quality
+print("\nCorrelations between Environmental Factors and Sleep Quality:")
+corr_subset = correlation_matrix.loc[all_predictors, sleep_quality_cols]
+print(corr_subset)
 
-plt.subplot(2, 1, 2)
-sns.lineplot(data=df, x="Date", y="PM2.5", marker='o', color='red', linewidth=2)
-plt.title("PM2.5 Levels Over Time", fontsize=14)
-plt.grid(True)
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
+# Find strongest correlations for each sleep quality metric
+print("\nStrongest correlations for each sleep quality metric:")
+for sleep_metric in sleep_quality_cols:
+    correlations = correlation_matrix[sleep_metric].loc[all_predictors].sort_values(ascending=False)
+    print(f"\n{sleep_metric}:")
+    print(correlations)
 
-fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+# ---------- 4. Visualization of Key Relationships ----------
+# Create scatter plots for the top correlations with each sleep metric
+for sleep_metric in sleep_quality_cols:
+    # Get top 3 correlations (absolute value)
+    top_correlations = correlation_matrix[sleep_metric].loc[all_predictors].abs().sort_values(ascending=False).head(3)
+    top_predictors = top_correlations.index.tolist()
+    
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig.suptitle(f"Top 3 Factors Affecting {sleep_metric.replace(' (min)', '')}", fontsize=16)
+    
+    for i, predictor in enumerate(top_predictors):
+        sns.regplot(data=df, x=predictor, y=sleep_metric, ax=axes[i])
+        axes[i].set_title(f"{predictor} vs {sleep_metric.replace(' (min)', '')}", fontsize=12)
+        axes[i].grid(True)
+        
+        # Add correlation coefficient to plot
+        corr_val = correlation_matrix.loc[predictor, sleep_metric]
+        axes[i].annotate(f"r = {corr_val:.2f}", xy=(0.05, 0.95), xycoords='axes fraction', 
+                         fontsize=12, bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8))
+    
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.85)
+    plt.show()
 
-sns.regplot(data=df, x="PM2.5", y="Total Sleep Duration (min)", ax=axes[0, 0])
-axes[0, 0].set_title("PM2.5 vs Total Sleep Duration", fontsize=14)
-axes[0, 0].grid(True)
+# ---------- 5. Multiple Regression Models ----------
+print("\n--- Multiple Regression Analysis ---")
 
-sns.regplot(data=df, x="PM2.5", y="REM Sleep (min)", ax=axes[0, 1])
-axes[0, 1].set_title("PM2.5 vs REM Sleep", fontsize=14)
-axes[0, 1].grid(True)
+# Create regression models for each sleep quality metric
+for sleep_metric in sleep_quality_cols:
+    print(f"\nRegression Model for {sleep_metric.replace(' (min)', '')}:")
+    
+    X = df[all_predictors]
+    X = sm.add_constant(X)  # Add constant term
+    y = df[sleep_metric]
+    
+    # Fit the model
+    model = sm.OLS(y, X).fit()
+    
+    # Print summary of key statistics
+    print(f"R-squared: {model.rsquared:.3f}")
+    print(f"Adjusted R-squared: {model.rsquared_adj:.3f}")
+    print(f"F-statistic: {model.fvalue:.2f}, p-value: {model.f_pvalue:.4f}")
+    
+    # Print significant predictors (p < 0.1)
+    significant_predictors = model.pvalues[1:][model.pvalues[1:] < 0.1]
+    if len(significant_predictors) > 0:
+        print("Significant predictors (p < 0.1):")
+        for predictor, p_value in significant_predictors.items():
+            coef = model.params[predictor]
+            print(f"  - {predictor}: coefficient = {coef:.3f}, p-value = {p_value:.4f}")
+    else:
+        print("No statistically significant predictors found at p < 0.1")
 
-sns.regplot(data=df, x="Temperature", y="Total Sleep Duration (min)", ax=axes[1, 0])
-axes[1, 0].set_title("Temperature vs Total Sleep Duration", fontsize=14)
-axes[1, 0].grid(True)
+# ---------- 6. Categorical Analysis for PM2.5 ----------
+print("\n--- PM2.5 Categorical Analysis ---")
 
-sns.regplot(data=df, x="Humidity", y="Total Sleep Duration (min)", ax=axes[1, 1])
-axes[1, 1].set_title("Humidity vs Total Sleep Duration", fontsize=14)
-axes[1, 1].grid(True)
-
-plt.tight_layout()
-plt.show()
-
-sleep_corr = correlation_matrix["Total Sleep Duration (min)"].sort_values(ascending=False)
-print("\nCorrelations with Total Sleep Duration:")
-print(sleep_corr)
-
-print("\n--- Multiple Linear Regression Model ---")
-
-predictors = ["PM2.5", "Temperature", "Humidity", "NO2"]
-X = df[predictors]
-X = sm.add_constant(X)  # Add constant term
-y = df["Total Sleep Duration (min)"]
-
-model = sm.OLS(y, X).fit()
-print(model.summary())
-
-print("\n--- T-Test Analysis ---")
-median_pm = df["PM2.5"].median()
-print(f"Median PM2.5 value: {median_pm}")
-
-low_pm = df[df["PM2.5"] <= median_pm]["Total Sleep Duration (min)"]
-high_pm = df[df["PM2.5"] > median_pm]["Total Sleep Duration (min)"]
-
-print(f"Average sleep on low PM2.5 days: {low_pm.mean():.2f} minutes ({low_pm.mean()/60:.2f} hours)")
-print(f"Average sleep on high PM2.5 days: {high_pm.mean():.2f} minutes ({high_pm.mean()/60:.2f} hours)")
-
-t_stat, p_val = stats.ttest_ind(low_pm.dropna(), high_pm.dropna(), equal_var=False)
-print(f"T-Test (Low vs High PM2.5): T = {t_stat:.2f}, p = {p_val:.4f}")
-
-pooled_std = np.sqrt(((len(low_pm) - 1) * low_pm.std()**2 + (len(high_pm) - 1) * high_pm.std()**2) / 
-                     (len(low_pm) + len(high_pm) - 2))
-cohen_d = (low_pm.mean() - high_pm.mean()) / pooled_std
-print(f"Effect size (Cohen's d): {cohen_d:.2f}")
-
-print("\n--- ANOVA Analysis ---")
+# Create PM2.5 categories: Low (≤30), Medium (31-60), High (>60)
 df["PM2.5 Category"] = pd.cut(df["PM2.5"], 
                             bins=[0, 30, 60, float('inf')],
                             labels=["Low", "Medium", "High"])
 
+# Display counts in each category
 category_counts = df["PM2.5 Category"].value_counts()
 print("PM2.5 Category Counts:")
 print(category_counts)
 
-categories = df["PM2.5 Category"].dropna().unique()
-sleep_by_category = [df[df["PM2.5 Category"] == cat]["Total Sleep Duration (min)"].dropna() for cat in categories]
-f_stat, p_val_anova = stats.f_oneway(*sleep_by_category)
-print(f"ANOVA Result: F = {f_stat:.2f}, p = {p_val_anova:.4f}")
-
-plt.figure(figsize=(10, 6))
-sns.boxplot(data=df, x="PM2.5 Category", y="Total Sleep Duration (min)")
-plt.title("Sleep Duration by PM2.5 Category", fontsize=14)
-plt.xlabel("PM2.5 Level", fontsize=12)
-plt.ylabel("Sleep Duration (minutes)", fontsize=12)
-plt.grid(True)
+# Create boxplots for each sleep quality metric by PM2.5 category
+plt.figure(figsize=(16, 6))
+for i, sleep_metric in enumerate(sleep_quality_cols):
+    plt.subplot(1, 3, i+1)
+    sns.boxplot(data=df, x="PM2.5 Category", y=sleep_metric)
+    plt.title(f"{sleep_metric.replace(' (min)', '')} by PM2.5 Category", fontsize=12)
+    plt.xlabel("PM2.5 Level", fontsize=10)
+    plt.ylabel("Duration (minutes)", fontsize=10)
+    plt.grid(True)
+plt.tight_layout()
 plt.show()
 
-print("\n--- Analysis Conclusion ---")
-print("This analysis explored the relationship between air quality metrics and sleep duration.")
-print("Key findings:")
-if p_val < 0.05 or p_val_anova < 0.05:
-    print("- There appears to be a significant relationship between PM2.5 levels and sleep duration")
-else:
-    print("- No statistically significant relationship was found between PM2.5 levels and sleep duration")
+# Run ANOVA for each sleep quality metric
+for sleep_metric in sleep_quality_cols:
+    print(f"\nANOVA for {sleep_metric.replace(' (min)', '')} by PM2.5 Category:")
+    categories = df["PM2.5 Category"].dropna().unique()
+    sleep_by_category = [df[df["PM2.5 Category"] == cat][sleep_metric].dropna() for cat in categories]
     
-print(f"- The regression model explains approximately {model.rsquared * 100:.1f}% of the variance in sleep duration")
-print(f"- The strongest air quality predictor of sleep duration was {predictors[np.argmax(np.abs(model.params[1:]))]}")
+    # Calculate means for each category
+    for i, cat in enumerate(categories):
+        mean_min = sleep_by_category[i].mean()
+        mean_hr = mean_min / 60
+        print(f"  - {cat} PM2.5: Mean = {mean_min:.1f} minutes ({mean_hr:.2f} hours)")
+    
+    # Run ANOVA if we have sufficient data
+    if all(len(group) > 0 for group in sleep_by_category):
+        f_stat, p_val_anova = stats.f_oneway(*sleep_by_category)
+        print(f"  ANOVA Result: F = {f_stat:.2f}, p = {p_val_anova:.4f}")
+        if p_val_anova < 0.05:
+            print("  * Statistically significant difference found (p < 0.05)")
+    else:
+        print("  Insufficient data for ANOVA test")
+
+
+# ---------- 8. Summary of Findings ----------
+print("\n--- Summary of Analysis ---")
+print("This analysis explored the relationships between air quality parameters, environmental factors, and sleep quality metrics.")
+
+# Summarize top correlations
+print("\nTop correlations with sleep quality metrics:")
+for sleep_metric in sleep_quality_cols:
+    top_corr = correlation_matrix[sleep_metric].loc[all_predictors].abs().sort_values(ascending=False).head(2)
+    print(f"\n{sleep_metric.replace(' (min)', '')}:")
+    for predictor in top_corr.index:
+        corr_val = correlation_matrix.loc[predictor, sleep_metric]
+        direction = "positive" if corr_val > 0 else "negative"
+        print(f"  - {predictor}: {direction} correlation (r = {corr_val:.2f})")
+
+# Conclude with key findings from regression analysis
+print("\nKey findings from regression models:")
+for sleep_metric in sleep_quality_cols:
+    X = df[all_predictors]
+    X = sm.add_constant(X)
+    y = df[sleep_metric]
+    model = sm.OLS(y, X).fit()
+    
+    r_squared = model.rsquared
+    print(f"\n{sleep_metric.replace(' (min)', '')}:")
+    print(f"  - Model explains {r_squared:.1%} of the variance")
+    
+    # Find most influential predictors (by absolute coefficient value, considering scale)
+    scaled_coefs = model.params[1:] * df[all_predictors].std()
+    most_influential = scaled_coefs.abs().sort_values(ascending=False).head(2)
+    
+    for predictor in most_influential.index:
+        coef = model.params[predictor]
+        direction = "increases" if coef > 0 else "decreases"
+        print(f"  - A 1-unit increase in {predictor} {direction} {sleep_metric.replace(' (min)', '')} by {abs(coef):.2f} minutes")
